@@ -1,34 +1,25 @@
+
 const express = require("express");
-const serverless = require("serverless-http");
 
 const app = express();
-
 app.use(express.json());
 
-// Test route
+// Root route
 app.get("/", (req, res) => {
-  res.status(200).send("Pastebin Lite running on Vercel");
+  res.status(200).send("Pastebin Lite is running ✅");
 });
 
-// API example
+// Example API
 app.post("/api/paste", (req, res) => {
-  const { content } = req.body;
-
-  if (!content) {
-    return res.status(400).json({ error: "Content is required" });
-  }
-
-  res.json({
+  res.status(200).json({
     success: true,
-    content
+    data: req.body
   });
 });
 
 /**
- * ❌ DO NOT USE app.listen()
- * ❌ DO NOT USE PORT
+ * ✅ IMPORTANT
+ * Export the app directly
+ * ❌ NO app.listen()
  */
-
-// ✅ Export handler (required)
-module.exports = serverless(app);
-
+module.exports = app;

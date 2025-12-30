@@ -1,5 +1,5 @@
+
 const express = require("express");
-const Database = require("better-sqlite3");
 const { nanoid } = require("nanoid");
 const cors = require("cors");
 
@@ -10,23 +10,12 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-/* ---------------- DATABASE ---------------- */
+/* ---------------- IN-MEMORY DATABASE ---------------- */
 /**
- * ✅ IMPORTANT FOR VERCEL
- * Use /tmp because filesystem is read-only
+ * ✅ REQUIRED FOR VERCEL
+ * Serverless-safe storage
  */
-const db = new Database("/tmp/pastes.db");
-
-db.prepare(`
-  CREATE TABLE IF NOT EXISTS pastes (
-    id TEXT PRIMARY KEY,
-    content TEXT NOT NULL,
-    expires_at INTEGER,
-    max_views INTEGER,
-    views INTEGER DEFAULT 0,
-    created_at INTEGER NOT NULL
-  )
-`).run();
+const pastes = new Map();
 
 /* ---------------- TIME HANDLING ---------------- */
 function getNow(req) {
@@ -61,28 +50,15 @@ app.get("/", (req, res) => {
 
 /* ---------------- HEALTH CHECK ---------------- */
 app.get("/api/healthz", (req, res) => {
-  try {
-    db.prepare("SELECT 1").get();
-    res.json({ ok: true });
-  } catch {
-    res.status(500).json({ ok: false });
-  }
+  res.json({ ok: true });
 });
 
 /* ---------------- CREATE PASTE ---------------- */
 app.post("/api/pastes", (req, res) => {
   const { content, ttl_seconds, max_views } = req.body;
 
-  if (!content || typeof content !== "string" || content.trim() === "") {
+  if (!content || content.trim() === "") {
     return res.status(400).json({ error: "Invalid content" });
-  }
-
-  if (ttl_seconds && (!Number.isInteger(Number(ttl_seconds)) || ttl_seconds < 1)) {
-    return res.status(400).json({ error: "Invalid ttl_seconds" });
-  }
-
-  if (max_views && (!Number.isInteger(Number(max_views)) || max_views < 1)) {
-    return res.status(400).json({ error: "Invalid max_views" });
   }
 
   const id = nanoid(10);
@@ -92,10 +68,14 @@ app.post("/api/pastes", (req, res) => {
     ? now + Number(ttl_seconds) * 1000
     : null;
 
-  db.prepare(`
-    INSERT INTO pastes (id, content, expires_at, max_views, created_at)
-    VALUES (?, ?, ?, ?, ?)
-  `).run(id, content, expires_at, max_views || null, now);
+  pastes.set(id, {
+    id,
+    content,
+    expires_at,
+    max_views: max_views ? Number(max_views) : null,
+    views: 0,
+    created_at: now
+  });
 
   res.status(201).json({
     id,
@@ -105,10 +85,7 @@ app.post("/api/pastes", (req, res) => {
 
 /* ---------------- FETCH PASTE (API) ---------------- */
 app.get("/api/pastes/:id", (req, res) => {
-  const paste = db.prepare(
-    "SELECT * FROM pastes WHERE id = ?"
-  ).get(req.params.id);
-
+  const paste = pastes.get(req.params.id);
   if (!paste) return res.status(404).json({ error: "Not found" });
 
   const now = getNow(req);
@@ -121,18 +98,14 @@ app.get("/api/pastes/:id", (req, res) => {
     return res.status(404).json({ error: "View limit exceeded" });
   }
 
-  db.prepare(
-    "UPDATE pastes SET views = views + 1 WHERE id = ?"
-  ).run(paste.id);
-
-  const remaining_views =
-    paste.max_views === null
-      ? null
-      : Math.max(0, paste.max_views - (paste.views + 1));
+  paste.views++;
 
   res.json({
     content: paste.content,
-    remaining_views,
+    remaining_views:
+      paste.max_views === null
+        ? null
+        : Math.max(0, paste.max_views - paste.views),
     expires_at: paste.expires_at
       ? new Date(paste.expires_at).toISOString()
       : null
@@ -141,10 +114,7 @@ app.get("/api/pastes/:id", (req, res) => {
 
 /* ---------------- VIEW PASTE (HTML) ---------------- */
 app.get("/p/:id", (req, res) => {
-  const paste = db.prepare(
-    "SELECT * FROM pastes WHERE id = ?"
-  ).get(req.params.id);
-
+  const paste = pastes.get(req.params.id);
   if (!paste) return res.status(404).send("Not found");
 
   const now = getNow(req);
@@ -157,9 +127,7 @@ app.get("/p/:id", (req, res) => {
     return res.status(404).send("View limit exceeded");
   }
 
-  db.prepare(
-    "UPDATE pastes SET views = views + 1 WHERE id = ?"
-  ).run(paste.id);
+  paste.views++;
 
   res.send(`
     <html>
@@ -170,9 +138,5 @@ app.get("/p/:id", (req, res) => {
   `);
 });
 
-/* ---------------- EXPORT APP FOR VERCEL ---------------- */
-/**
- * ❌ DO NOT use app.listen()
- * ✅ Vercel will handle it
- */
+/* ---------------- EXPORT APP ---------------- */
 module.exports = app;

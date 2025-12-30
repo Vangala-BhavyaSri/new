@@ -1,5 +1,3 @@
-
-
 const express = require("express");
 const Database = require("better-sqlite3");
 const { nanoid } = require("nanoid");
@@ -13,7 +11,11 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 /* ---------------- DATABASE ---------------- */
-const db = new Database("pastes.db");
+/**
+ * ✅ IMPORTANT FOR VERCEL
+ * Use /tmp because filesystem is read-only
+ */
+const db = new Database("/tmp/pastes.db");
 
 db.prepare(`
   CREATE TABLE IF NOT EXISTS pastes (
@@ -168,11 +170,9 @@ app.get("/p/:id", (req, res) => {
   `);
 });
 
-/* ---------------- START SERVER ---------------- */
-
+/* ---------------- EXPORT APP FOR VERCEL ---------------- */
 /**
- * ✅ IMPORTANT
- * Export the app directly
- * ❌ NO app.listen()
+ * ❌ DO NOT use app.listen()
+ * ✅ Vercel will handle it
  */
 module.exports = app;
